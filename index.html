@@ -325,7 +325,8 @@
     // 4. NA SEÇÃO "URL CONFIGURATION", ENCONTRE O CAMPO "SITE URL".
     // 5. APAGUE "http://localhost:3000" E COLOQUE A URL **EXATA** DO SEU SITE NO GITHUB PAGES.
     //    O FORMATO É: https://SEU-USUARIO.github.io/NOME-DO-SEU-REPOSITORIO/
-    //    (Exemplo: https://matheusdev-sys.github.io/controle-estoque-senai/)
+    //    (Exemplo: https://matheusdev-sys.github.io/Controle-de-Estoque/)
+    //    **ATENÇÃO:** O NOME DO REPOSITÓRIO É SENSÍVEL A MAIÚSCULAS E MINÚSCULAS!
     // 6. CLIQUE EM "SAVE".
     //
     // SEM ESTE PASSO, O LINK DE CONFIRMAÇÃO DO E-MAIL DARÁ ERRO 404.
@@ -428,6 +429,28 @@
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
+        // --- SCRIPT DE CORREÇÃO PARA GITHUB PAGES E SUPABASE ---
+        // Este script lida com o token de acesso que o Supabase anexa à URL após a confirmação do e-mail.
+        if (window.location.hash.includes('_token')) {
+            const params = new URLSearchParams(window.location.hash.substring(1)); // Remove o '#'
+            const accessToken = params.get('access_token');
+            const refreshToken = params.get('refresh_token');
+
+            if (accessToken && refreshToken) {
+                // Define a sessão usando os tokens da URL
+                supabase.createClient(supabaseUrl, supabaseKey).auth.setSession({
+                    access_token: accessToken,
+                    refresh_token: refreshToken,
+                }).then(({ error }) => {
+                    if (error) {
+                        console.error("Erro ao definir sessão a partir da URL:", error);
+                    }
+                    // Limpa a URL e recarrega a página para um estado limpo.
+                    window.location.replace(window.location.pathname);
+                });
+            }
+        }
+
         // --- CONSTANTES E VARIÁVEIS GLOBAIS ---
         // UI Elements
         const authContainer = document.getElementById('auth-container');
@@ -447,37 +470,40 @@
         const signUpButton = document.getElementById('signUp');
         const signInButton = document.getElementById('signIn');
 
-        signUpButton.addEventListener('click', () => {
-            authContainer.classList.add('right-panel-active');
-        });
-
-        signInButton.addEventListener('click', () => {
-            authContainer.classList.remove('right-panel-active');
-        });
+        signUpButton.addEventListener('click', () => { authContainer.classList.add('right-panel-active'); });
+        signInButton.addEventListener('click', () => { authContainer.classList.remove('right-panel-active'); });
 
         // --- CONFIGURAÇÃO DO SUPABASE ---
         const supabaseUrl = 'https://hpcbeqvlnfufdhilbpme.supabase.co';
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwY2JlcXZsbmZ1ZmRoaWxicG1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MTMzMTMsImV4cCI6MjA3NjA4OTMxM30.B_I6q-VLbCzs7EqjEL9jdlnKl2fIpEdpbNXs3OmVIsk';
         const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
-
         // --- LÓGICA DE AUTENTICAÇÃO E SESSÃO ---
 
         // Listener para mudanças no estado de autenticação
         supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            if (event === 'SIGNED_IN' && session) {
-                await fetchUserProfile(session.user);
-                if (currentUserProfile) {
-                    showApp();
-                } else {
-                    showToast('Erro ao carregar perfil do usuário após login.', 'error');
-                    await supabaseClient.auth.signOut();
-                }
+            setLoading(true);
+            if (event === 'INITIAL_SESSION' && session) {
+                await handleUserLoggedIn(session.user);
+            } else if (event === 'SIGNED_IN' && session) {
+                 await handleUserLoggedIn(session.user);
             } else if (event === 'SIGNED_OUT') {
                 currentUserProfile = null;
                 showAuth();
             }
+            setLoading(false);
         });
+        
+        async function handleUserLoggedIn(user) {
+            await fetchUserProfile(user);
+            if (currentUserProfile) {
+                showApp();
+            } else {
+                showToast('Falha ao sincronizar perfil. Tente logar novamente.', 'error');
+                await supabaseClient.auth.signOut();
+            }
+        }
+
 
         // Registro de novo usuário
         registerForm.addEventListener('submit', async (e) => {
@@ -490,10 +516,15 @@
                 showToast('As senhas não coincidem.', 'error');
                 return;
             }
-            // Add other password validation checks here if needed before submitting
-
+            
             setLoading(true);
-            const { error } = await supabaseClient.auth.signUp({ email, password });
+            const { error } = await supabaseClient.auth.signUp({ 
+                email, 
+                password,
+                options: {
+                    emailRedirectTo: window.location.origin + window.location.pathname
+                }
+             });
             setLoading(false);
 
             if (error) {
@@ -511,7 +542,7 @@
             const password = document.getElementById('loginPassword').value;
             
             setLoading(true);
-            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+            const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
             setLoading(false);
 
             if (error) {
@@ -523,7 +554,6 @@
                     showToast(error.message, 'error');
                 }
             }
-            // O onAuthStateChange cuidará de redirecionar para o app se o login for bem-sucedido
         });
         
         // Validação de senha em tempo real
@@ -537,13 +567,9 @@
 
         passwordInput.addEventListener('input', () => {
             const value = passwordInput.value;
-            // Length check
             requirements.length.classList.toggle('valid', value.length >= 8);
-            // Uppercase check
             requirements.uppercase.classList.toggle('valid', /[A-Z]/.test(value));
-            // Number check
             requirements.number.classList.toggle('valid', /[0-9]/.test(value));
-            // Special character check
             requirements.special.classList.toggle('valid', /[^A-Za-z0-9]/.test(value));
         });
 
@@ -556,8 +582,8 @@
         });
 
         // Busca o perfil do usuário na tabela 'profiles', com retentativas para evitar race conditions
-        async function fetchUserProfile(user, retries = 3) {
-            for (let i = 0; i < retries; i++) {
+        async function fetchUserProfile(user, retries = 5) {
+            for (let i = 0; i <= retries; i++) {
                 const { data, error } = await supabaseClient
                     .from('profiles')
                     .select('role')
@@ -566,24 +592,21 @@
 
                 if (data) {
                     currentUserProfile = { ...user, role: data.role };
-                    return; // Sucesso
+                    return;
                 }
 
-                // Erro "PGRST116" significa "não encontrou exatamente uma linha", o que acontece se o perfil ainda não foi criado.
                 if (error && error.code !== 'PGRST116') {
                     console.error('Erro ao buscar perfil:', error);
                     currentUserProfile = null;
-                    return; // Não tenta novamente em outros tipos de erro.
+                    return;
                 }
                 
-                // Se o perfil não foi encontrado, espera e tenta novamente.
-                if (i < retries - 1) {
+                if (i < retries) {
                     console.warn(`Perfil não encontrado, tentando novamente... (${i + 1}/${retries})`);
-                    await new Promise(res => setTimeout(res, 750)); // Espera 750ms
+                    await new Promise(res => setTimeout(res, i * 500 + 250)); // Aumenta o tempo de espera a cada tentativa
                 }
             }
             
-            // Se todas as tentativas falharem
             console.error('Não foi possível buscar o perfil do usuário após várias tentativas.');
             currentUserProfile = null;
         }
@@ -629,7 +652,6 @@
                     showToast("Estoque inicial carregado com sucesso!", 'success');
                 }
                 setLoading(false);
-                await updateDashboard(); // Update dashboard after seeding
             }
         }
         
@@ -719,33 +741,14 @@
                 </li>
             `).join('');
         }
-
-
-        // --- INICIALIZAÇÃO ---
-        async function init() {
-            setLoading(true);
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (session) {
-                await fetchUserProfile(session.user);
-                if(currentUserProfile) {
-                    showApp();
-                } else {
-                    // Could be a race condition where profile is not ready, sign out and let user retry.
-                    await supabaseClient.auth.signOut();
-                    showAuth();
-                }
-            } else {
-                showAuth();
-            }
-            setLoading(false);
-        }
         
-        function showApp() {
+        async function showApp() {
             authSection.style.display = 'none';
             appSection.style.display = 'block';
             document.getElementById('currentUser').innerHTML = `Bem-vindo, <span class="font-semibold">${currentUserProfile.email}</span> (<span class="italic">${currentUserProfile.role}</span>)`;
             renderUIForRole();
-            updateDashboard();
+            await seedInitialData();
+            await updateDashboard();
         }
 
         function showAuth() {
@@ -755,6 +758,7 @@
         }
 
         function renderUIForRole() {
+            document.body.className = 'antialiased text-slate-700'; // Limpa classes antigas
             const role = currentUserProfile.role;
             document.body.classList.add(role);
         }
@@ -771,7 +775,7 @@
             clearTimeout(toastTimeout);
             toastTimeout = setTimeout(() => {
                 toast.style.transform = 'translateX(120%)';
-            }, 4000);
+            }, 5000); 
         }
         
         window.handleDeleteProduct = async (id, name) => {
@@ -788,7 +792,6 @@
             }
         };
 
-        init();
     });
     </script>
 </body>
