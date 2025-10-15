@@ -850,7 +850,29 @@
             if (count === 0) {
                 showToast("Primeiro acesso detectado. Populando estoque inicial...");
                 setLoading(true);
-                const initialData = [ { name: "Alicate de Bico Meia Cana Reto", quantity: 13 }, { name: "Chave ajustavel \"8\" (CHAVE INGLESA)", quantity: 3 }, { name: "Esmerilhadeira angular", quantity: 1 }, { name: "Percloreto de Ferro PF-1", quantity: 1 }, { name: "Perfurador de Placa P/ Circuito Impresso", quantity: 4 }, { name: "Placa para Circuito Impresso", quantity: 40 }, { name: "Suporte para Ferro de Soldar", quantity: 7 }, { name: "Ferro de Soldar", quantity: 7 }, { name: "Solda 22g", quantity: 14 }, { name: "Chave de Fenda - ponta magnetica (3/16\" x 6\")", quantity: 13 }, { name: "Chave de Fenda - ponta magnetica (1/4\" x 6\")", quantity: 13 }, { name: "Chave de Phillips - ponta magnetica (1/8\" x 5\")", quantity: 13 }, { name: "Chave de Phillips - ponta magnetica - n° 1", quantity: 13 }, { name: "Chave de Phillips - ponta magnetica - n° 2", quantity: 13 }, { name: "Fitas Isolantes classe C 10 metros", quantity: 3 }, { name: "Identificador de Cabos Multifunção", quantity: 7 }, { name: "Jogo de Chaves ALLEN - 9 pcs", quantity: 13 }, { name: "Paquimetro Universal 150mm", quantity: 7 }, { name: "Sugador de Solda", quantity: 7 }, { name: "Jogo de Chaves Relojoeiro 2 phillips 4 fendas", quantity: 6 }, { name: "Kits FPGA com USB Blater", quantity: 3 }, { name: "Alicate Corta e Desencapa Cabos \"7\"", quantity: 13 }, { name: "Alicate Crimpar / Crimpador Desencapar Cabo De Rede", quantity: 4 }, { name: "Alicate de Corte Diagonal \"6\" - Black Nikel", quantity: 14 }, { name: "Alicate de Crimpar Catraca 3 em 1", quantity: 15 }, { name: "Alicate Decapador", quantity: 8 }, { name: "Alicate Push Down", quantity: 15 }, { name: "Alicate Push Down sem Regulagem", quantity: 4 }, { name: "Baterias 9w", quantity: 3 }, { name: "Cabos de Transferencia de Dados USB x Impressora", quantity: 20 }, { name: "Resistores", quantity: 250 }, { name: "Arduino UNO R3 + Cabo USB", quantity: 20 }, { name: "Arduino Nano + Cabo USB", quantity: 4 }, { name: "Cabo de comunicação Azul para Arduino", quantity: 8 }, { name: "Protoboard 400 pontos", quantity: 3 }, { name: "Multimeter", quantity: 4 }, { name: "Potenciometro Linear 10K", quantity: 40 }, { name: "Potenciometro Linear 1K", quantity: 1 }, { name: "Bobinas PLA Branco", quantity: 1 }, { name: "Bobinas PLA Preto", quantity: 1 }, { name: "Bobinas PLA Pink", quantity: 1 }, { name: "Bobinas ABS Verde Claro", quantity: 1 }, { name: "Maleta Organizadora ESP-32 DEVKIT V1", quantity: 13 }, { name: "Maleta Organizadora de Componentes Eletronicos", quantity: 2 } ];
+                const initialData = [
+                    { name: "Alicate de Bico Meia Cana Reto", quantity: 13 }, { name: "Chave ajustavel 8\" (CHAVE INGLESA)", quantity: 3 },
+                    { name: "Esmerilhadeira angular", quantity: 1 }, { name: "Percloreto de Ferro PF-1", quantity: 1 },
+                    { name: "Perfurador de Placa P/ Circuito Impresso", quantity: 4 }, { name: "Placa para Circuito Impresso", quantity: 40 },
+                    { name: "Suporte para Ferro de Soldar", quantity: 7 }, { name: "Ferro de Soldar", quantity: 7 }, { name: "Solda 22g", quantity: 14 },
+                    { name: "Chave de Fenda - ponta magnetica 3/16\" x 6\"", quantity: 13 }, { name: "Chave de Fenda - ponta magnetica 1/4\" x 6\"", quantity: 13 },
+                    { name: "Chave de Phillips - ponta magnetica 1/8\" x 5\"", quantity: 13 }, { name: "Chave de Phillips - ponta magnetica - n° 1", quantity: 13 },
+                    { name: "Chave de Phillips - ponta magnetica - n° 2", quantity: 13 }, { name: "Fitas Isolantes classe C 10 metros", quantity: 3 },
+                    { name: "Identificador de Cabos Multifunção", quantity: 7 }, { name: "Jogo de Chaves ALLEN - 9 pcs", quantity: 13 },
+                    { name: "Paquimetro Universal 150mm", quantity: 7 }, { name: "Sugador de Solda", quantity: 7 },
+                    { name: "Jogo de Chaves Relojoeiro 2 phillips 4 fendas", quantity: 6 }, { name: "Kits FPGA com USB Blater", quantity: 3 },
+                    { name: "Alicate Corta e Desencapa Cabos 7\"", quantity: 13 }, { name: "Alicate Crimpar / Crimpador Desencapar Cabo De Rede", quantity: 4 },
+                    { name: "Alicate de Corte Diagonal 6\" - Black Nikel", quantity: 14 }, { name: "Alicate de Crimpar Catraca 3 em 1", quantity: 15 },
+                    { name: "Alicate Decapador", quantity: 8 }, { name: "Alicate Push Down", quantity: 15 }, { name: "Alicate Push Down sem Regulagem", quantity: 4 },
+                    { name: "Baterias 9w", quantity: 3 }, { name: "Cabos de Transferencia de Dados USB x Impressora", quantity: 20 },
+                    { name: "Resistores", quantity: 250 }, { name: "Arduino UNO R3 + Cabo USB", quantity: 20 }, { name: "Arduino Nano + Cabo USB", quantity: 4 },
+                    { name: "Cabo de comunicação Azul para Arduino", quantity: 8 }, { name: "Protoboard 400 pontos", quantity: 3 },
+                    { name: "Multimeter", quantity: 4 }, { name: "Potenciometro Linear 10K", quantity: 40 }, { name: "Potenciometro Linear 1K", quantity: 1 },
+                    { name: "Bobinas PLA Branco", quantity: 1 }, { name: "Bobinas PLA Preto", quantity: 1 }, { name: "Bobinas PLA Pink", quantity: 1 },
+                    { name: "Bobinas ABS Verde Claro", quantity: 1 }, { name: "Maleta Organizadora ESP-32 DEVKIT V1", quantity: 13 },
+                    { name: "Maleta Organizadora de Componentes Eletronicos", quantity: 2 }
+                ];
+                
                 const { error: insertError } = await supabaseClient.from('products').insert(initialData);
                 if (insertError) {
                     showToast("Erro ao popular estoque: " + insertError.message, 'error');
