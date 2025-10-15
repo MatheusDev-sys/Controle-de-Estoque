@@ -425,6 +425,18 @@
         
         let currentUserProfile = null; // Armazena o perfil do usuário logado (incluindo o 'role')
 
+        // --- UI TRANSITIONS for Login/Register Panel ---
+        const signUpButton = document.getElementById('signUp');
+        const signInButton = document.getElementById('signIn');
+
+        signUpButton.addEventListener('click', () => {
+            authContainer.classList.add('right-panel-active');
+        });
+
+        signInButton.addEventListener('click', () => {
+            authContainer.classList.remove('right-panel-active');
+        });
+
         // --- CONFIGURAÇÃO DO SUPABASE ---
         const supabaseUrl = 'https://hpcbeqvlnfufdhilbpme.supabase.co';
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwY2JlcXZsbmZ1ZmRoaWxicG1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MTMzMTMsImV4cCI6MjA3NjA4OTMxM30.B_I6q-VLbCzs7EqjEL9jdlnKl2fIpEdpbNXs3OmVIsk';
@@ -654,4 +666,5 @@
     </script>
 </body>
 </html>
+
 
