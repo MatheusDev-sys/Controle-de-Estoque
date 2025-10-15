@@ -87,11 +87,13 @@
 
         body.admin .admin-only,
         body.admin .manager-only { display: block; }
-        body.admin button.admin-only { display: inline-block; }
+        body.admin button.admin-only, body.admin a.admin-only { display: inline-block; }
         body.admin th.admin-only,
         body.admin td.admin-only { display: table-cell; }
 
         body.gerente .manager-only { display: block; }
+        body.gerente button.manager-only, body.gerente a.manager-only { display: inline-block; }
+
 
         /* Loader */
         .loader {
@@ -233,9 +235,12 @@
                 <div class="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <!-- Relatório de Estoque Atual -->
                     <div class="bg-white p-6 rounded-xl shadow-lg">
-                        <div class="flex justify-between items-center mb-4">
+                        <div class="flex justify-between items-center mb-4 gap-4">
                             <h3 class="font-bold text-xl">Estoque Atual</h3>
-                            <input type="text" id="searchInput" placeholder="Buscar produto..." class="p-2 border rounded-lg text-sm">
+                            <div class="flex items-center gap-2">
+                                <input type="text" id="searchInput" placeholder="Buscar produto..." class="p-2 border rounded-lg text-sm w-48">
+                                <button id="btn-add-product" class="manager-only whitespace-nowrap text-sm bg-blue-600 text-white font-semibold px-3 py-2 rounded-lg hover:bg-blue-700">+ Novo Produto</button>
+                            </div>
                         </div>
                         <div class="overflow-auto max-h-96">
                             <table class="w-full text-sm text-left">
@@ -264,6 +269,12 @@
                 </div>
             </div>
         </main>
+        <footer class="text-center text-sm text-slate-500 p-6 mt-8 border-t">
+            <div class="flex justify-center items-center gap-2">
+                <img src="uploaded:8936e93a-41b1-4387-95ba-82fdf30260c4.png-9976c656-e11d-45a7-8f59-f5efb90061ec" alt="Logo StockVision" class="h-6">
+                <span>© 2025 StockVision. Todos os direitos reservados.</span>
+            </div>
+        </footer>
     </div>
     
     <!-- Modals -->
@@ -272,7 +283,8 @@
             <h2 id="modalTitle" class="text-2xl font-bold mb-6 text-center"></h2>
             <form id="modalForm">
                 <div class="space-y-4">
-                    <input type="text" id="modalProduto" placeholder="Nome do Produto" class="w-full p-3 bg-slate-100 rounded-lg" required>
+                    <input type="text" id="modalProduto" list="productList" placeholder="Nome do Produto" class="w-full p-3 bg-slate-100 rounded-lg" required>
+                    <datalist id="productList"></datalist>
                     <input type="number" id="modalQuantidade" placeholder="Quantidade" class="w-full p-3 bg-slate-100 rounded-lg" min="1" required>
                     <div id="emprestimoFields" class="hidden space-y-4">
                         <input type="text" id="modalPessoa" placeholder="Nome do Solicitante" class="w-full p-3 bg-slate-100 rounded-lg">
@@ -282,6 +294,28 @@
                 <div class="flex justify-end space-x-4 mt-8">
                     <button type="button" id="modalCancel" class="px-6 py-2 bg-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-300">Cancelar</button>
                     <button type="submit" id="modalConfirm" class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700">Confirmar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="newProductModal" class="modal fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md">
+            <h2 id="newProductModalTitle" class="text-2xl font-bold mb-6 text-center">Cadastrar Novo Produto</h2>
+            <form id="newProductForm">
+                <div class="space-y-4">
+                    <div>
+                        <label for="newProductName" class="block mb-1 text-sm font-medium text-slate-700 text-left">Nome do Produto</label>
+                        <input type="text" id="newProductName" placeholder="Ex: Alicate de Corte" class="w-full p-3 bg-slate-100 rounded-lg" required>
+                    </div>
+                    <div>
+                        <label for="newProductQuantity" class="block mb-1 text-sm font-medium text-slate-700 text-left">Quantidade Inicial</label>
+                        <input type="number" id="newProductQuantity" placeholder="0" class="w-full p-3 bg-slate-100 rounded-lg" min="0" value="0" required>
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-4 mt-8">
+                    <button type="button" id="newProductCancel" class="px-6 py-2 bg-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-300">Cancelar</button>
+                    <button type="submit" class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700">Cadastrar</button>
                 </div>
             </form>
         </div>
@@ -386,7 +420,7 @@
     DROP POLICY IF EXISTS "Allow all authenticated for movements" ON public.movements;
     DROP FUNCTION IF EXISTS get_my_role();
     DROP FUNCTION IF EXISTS delete_auth_user(uuid);
-    DROP FUNCTION IF EXISTS record_movement(text,text,integer,text,text,date);
+    DROP FUNCTION IF EXISTS record_movement(text, text, integer, text, text, date);
 
     -- Função auxiliar para buscar o 'role' do usuário atual de forma segura.
     CREATE OR REPLACE FUNCTION get_my_role()
@@ -438,14 +472,14 @@
     END;
     $$;
 
-    -- Função para registrar movimentação de estoque (chamada via RPC)
+    -- CORREÇÃO: Função para registrar movimentação com parâmetros na ordem correta para o RPC.
     CREATE OR REPLACE FUNCTION record_movement(
         p_name text,
         p_type text,
         p_quantity integer,
         p_user_email text,
-        p_loaned_to text DEFAULT NULL,
-        p_return_date date DEFAULT NULL
+        p_loaned_to text,
+        p_return_date date
     ) RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER AS $$
     DECLARE
         v_product_id int;
@@ -513,6 +547,7 @@
         const loginForm = document.getElementById('loginForm');
         const registerForm = document.getElementById('registerForm');
         let currentUserProfile = null;
+        let productNames = [];
 
         // --- CONFIGURAÇÃO DO SUPABASE ---
         const supabaseUrl = 'https://hpcbeqvlnfufdhilbpme.supabase.co';
@@ -547,9 +582,10 @@
         };
 
         const renderUIForRole = () => {
-            document.body.className = 'antialiased text-slate-700';
-            const role = currentUserProfile.role;
-            document.body.classList.add(role);
+            document.body.classList.remove('admin', 'gerente', 'estoquista');
+            if (currentUserProfile && currentUserProfile.role) {
+                document.body.classList.add(currentUserProfile.role);
+            }
         };
 
         // --- LÓGICA DE AUTENTICAÇÃO PRINCIPAL ---
@@ -658,7 +694,11 @@
         
         // --- LÓGICA DAS FUNCIONALIDADES ---
         
-        // Abrir Modals de Ação
+        const populateProductDatalist = () => {
+            const datalist = document.getElementById('productList');
+            datalist.innerHTML = productNames.map(name => `<option value="${name}"></option>`).join('');
+        };
+        
         const actionModal = document.getElementById('actionModal');
         const modalTitle = document.getElementById('modalTitle');
         const modalForm = document.getElementById('modalForm');
@@ -668,6 +708,7 @@
         const openActionModal = (type) => {
             currentActionType = type;
             modalForm.reset();
+            populateProductDatalist();
             modalTitle.textContent = `Registrar ${type.charAt(0).toUpperCase() + type.slice(1)}`;
             emprestimoFields.classList.toggle('hidden', type !== 'emprestimo');
             document.getElementById('modalPessoa').required = type === 'emprestimo';
@@ -680,21 +721,18 @@
         document.getElementById('btn-add-emprestimo').addEventListener('click', () => openActionModal('emprestimo'));
         document.getElementById('modalCancel').addEventListener('click', () => actionModal.classList.add('hidden'));
 
-        // Submissão do Modal de Ação
         modalForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             setLoading(true);
 
-            const params = {
+            const { data, error } = await supabaseClient.rpc('record_movement', {
                 p_name: document.getElementById('modalProduto').value,
                 p_type: currentActionType,
                 p_quantity: parseInt(document.getElementById('modalQuantidade').value),
                 p_user_email: currentUserProfile.email,
                 p_loaned_to: currentActionType === 'emprestimo' ? document.getElementById('modalPessoa').value : null,
                 p_return_date: currentActionType === 'emprestimo' ? document.getElementById('modalDevolucao').value : null,
-            };
-
-            const { data, error } = await supabaseClient.rpc('record_movement', params);
+            });
 
             setLoading(false);
             if (error || (data && data.startsWith('ERRO'))) {
@@ -706,7 +744,42 @@
             }
         });
 
-        // Modal de Alertas
+        // Modal de Novo Produto
+        const newProductModal = document.getElementById('newProductModal');
+        const newProductForm = document.getElementById('newProductForm');
+        document.getElementById('btn-add-product').addEventListener('click', () => {
+            newProductForm.reset();
+            newProductModal.classList.remove('hidden');
+        });
+        document.getElementById('newProductCancel').addEventListener('click', () => newProductModal.classList.add('hidden'));
+        newProductForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const productName = document.getElementById('newProductName').value;
+            const initialQuantity = parseInt(document.getElementById('newProductQuantity').value);
+
+            if (initialQuantity < 0) {
+                showToast('A quantidade inicial não pode ser negativa.', 'error');
+                return;
+            }
+            setLoading(true);
+            const { data, error } = await supabaseClient.rpc('record_movement', {
+                p_name: productName,
+                p_type: 'entrada',
+                p_quantity: initialQuantity,
+                p_user_email: currentUserProfile.email,
+                p_loaned_to: null,
+                p_return_date: null
+            });
+            setLoading(false);
+            if (error || (data && data.startsWith('ERRO'))) {
+                showToast(error ? error.message : data, 'error');
+            } else {
+                showToast('Produto cadastrado com sucesso!', 'success');
+                newProductModal.classList.add('hidden');
+                await updateDashboard();
+            }
+        });
+
         const alertModal = document.getElementById('alertModal');
         document.getElementById('btn-show-alertas').addEventListener('click', async () => {
             setLoading(true);
@@ -722,19 +795,12 @@
             if (data.length === 0) {
                 alertList.innerHTML = '<p class="text-center text-slate-500">Nenhum item com baixo estoque.</p>';
             } else {
-                alertList.innerHTML = `
-                    <table class="w-full text-sm text-left">
-                        <thead class="bg-slate-100"><tr><th class="p-2">Produto</th><th class="p-2">Qtd. Restante</th></tr></thead>
-                        <tbody>${data.map(p => `
-                            <tr class="border-b"><td class="p-2">${p.name}</td><td class="p-2 font-bold text-red-600">${p.quantity}</td></tr>`
-                        ).join('')}</tbody>
-                    </table>`;
+                alertList.innerHTML = `<table class="w-full text-sm text-left"><thead class="bg-slate-100"><tr><th class="p-2">Produto</th><th class="p-2">Qtd. Restante</th></tr></thead><tbody>${data.map(p => `<tr class="border-b"><td class="p-2">${p.name}</td><td class="p-2 font-bold text-red-600">${p.quantity}</td></tr>`).join('')}</tbody></table>`;
             }
             alertModal.classList.remove('hidden');
         });
         document.getElementById('closeAlertModal').addEventListener('click', () => alertModal.classList.add('hidden'));
 
-        // Modal de Gerenciar Usuários
         const manageUsersModal = document.getElementById('manageUsersModal');
         document.getElementById('manageUsersButton').addEventListener('click', async () => {
             setLoading(true);
@@ -747,25 +813,7 @@
             }
 
             const usersList = document.getElementById('usersList');
-            usersList.innerHTML = `
-                <table class="w-full text-sm text-left">
-                    <thead class="bg-slate-100"><tr><th class="p-2">Email</th><th class="p-2">Cargo</th><th class="p-2">Ações</th></tr></thead>
-                    <tbody>${data.map(user => `
-                        <tr class="border-b">
-                            <td class="p-2">${user.email}</td>
-                            <td class="p-2">
-                                <select onchange="updateUserRole('${user.id}', this.value)" class="p-1 border rounded-md bg-white" ${currentUserProfile.id === user.id ? 'disabled' : ''}>
-                                    <option value="estoquista" ${user.role === 'estoquista' ? 'selected' : ''}>Estoquista</option>
-                                    <option value="gerente" ${user.role === 'gerente' ? 'selected' : ''}>Gerente</option>
-                                    <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
-                                </select>
-                            </td>
-                            <td class="p-2">
-                                <button onclick="deleteUser('${user.id}', '${user.email}')" class="text-red-500 hover:text-red-700" ${currentUserProfile.id === user.id ? 'disabled' : ''}>Excluir</button>
-                            </td>
-                        </tr>
-                    `).join('')}</tbody>
-                </table>`;
+            usersList.innerHTML = `<table class="w-full text-sm text-left"><thead class="bg-slate-100"><tr><th class="p-2">Email</th><th class="p-2">Cargo</th><th class="p-2">Ações</th></tr></thead><tbody>${data.map(user => `<tr class="border-b"><td class="p-2">${user.email}</td><td class="p-2"><select onchange="updateUserRole('${user.id}', this.value)" class="p-1 border rounded-md bg-white" ${currentUserProfile.id === user.id ? 'disabled' : ''}><option value="estoquista" ${user.role === 'estoquista' ? 'selected' : ''}>Estoquista</option><option value="gerente" ${user.role === 'gerente' ? 'selected' : ''}>Gerente</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option></select></td><td class="p-2"><button onclick="deleteUser('${user.id}', '${user.email}')" class="text-red-500 hover:text-red-700" ${currentUserProfile.id === user.id ? 'disabled' : ''}>Excluir</button></td></tr>`).join('')}</tbody></table>`;
             manageUsersModal.classList.remove('hidden');
         });
         document.getElementById('closeUsersModal').addEventListener('click', () => manageUsersModal.classList.add('hidden'));
@@ -790,7 +838,7 @@
                      showToast(error ? error.message : data, 'error');
                 } else {
                     showToast(data, 'success');
-                    document.getElementById('manageUsersButton').click(); // Recarrega a lista
+                    document.getElementById('manageUsersButton').click();
                 }
             }
         };
@@ -817,6 +865,7 @@
             if(!currentUserProfile) return;
             setLoading(true);
             const { data: products, errorP } = await supabaseClient.from('products').select('*').order('name');
+            productNames = products ? products.map(p => p.name) : [];
             const { data: movements, errorM } = await supabaseClient.from('movements').select('*, products(name)').order('created_at', { ascending: false }).limit(10);
             setLoading(false);
             
