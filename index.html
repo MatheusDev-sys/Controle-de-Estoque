@@ -377,21 +377,32 @@
     ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
     ALTER TABLE public.movements ENABLE ROW LEVEL SECURITY;
 
-    -- Limpa políticas antigas antes de criar novas
-    DROP POLICY IF EXISTS "Public profiles are viewable by users." ON public.profiles;
+    -- Limpa políticas antigas antes de criar novas para garantir um estado limpo
+    DROP POLICY IF EXISTS "Admins can manage all profiles." ON public.profiles;
+    DROP POLICY IF EXISTS "Users can view their own profile." ON public.profiles;
     DROP POLICY IF EXISTS "Users can insert their own profile." ON public.profiles;
     DROP POLICY IF EXISTS "Users can update own profile." ON public.profiles;
-    DROP POLICY IF EXISTS "Admins can manage all profiles." ON public.profiles;
     DROP POLICY IF EXISTS "Allow all authenticated to read products and movements" ON public.products;
     DROP POLICY IF EXISTS "Allow all authenticated to manage products" ON public.products;
     DROP POLICY IF EXISTS "Allow all authenticated to read products and movements" ON public.movements;
     DROP POLICY IF EXISTS "Allow all authenticated to insert movements" ON public.movements;
+    DROP FUNCTION IF EXISTS get_my_role();
+
+    -- Função auxiliar para buscar o 'role' do usuário atual de forma segura, evitando recursão.
+    CREATE OR REPLACE FUNCTION get_my_role()
+    RETURNS TEXT AS $$
+    BEGIN
+      -- Esta função é SECURITY DEFINER, então ela ignora as políticas RLS da tabela 'profiles'
+      -- permitindo a verificação do 'role' sem causar um loop infinito.
+      RETURN (SELECT role FROM public.profiles WHERE id = auth.uid());
+    END;
+    $$ LANGUAGE plpgsql SECURITY DEFINER;
 
     -- Políticas de Acesso para a tabela PROFILES
-    CREATE POLICY "Public profiles are viewable by users." ON public.profiles FOR SELECT USING (auth.role() = 'authenticated');
+    CREATE POLICY "Admins can manage all profiles." ON public.profiles FOR ALL USING (get_my_role() = 'admin');
+    CREATE POLICY "Users can view their own profile." ON public.profiles FOR SELECT USING (auth.uid() = id);
     CREATE POLICY "Users can insert their own profile." ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
     CREATE POLICY "Users can update own profile." ON public.profiles FOR UPDATE USING (auth.uid() = id);
-    CREATE POLICY "Admins can manage all profiles." ON public.profiles FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
 
     -- Políticas para PRODUCTS e MOVEMENTS (estoque compartilhado)
     CREATE POLICY "Allow all authenticated to read products and movements" ON public.products FOR SELECT USING (auth.role() = 'authenticated');
@@ -428,84 +439,94 @@
     -->
 
     <script>
-    document.addEventListener('DOMContentLoaded', () => {
-        // --- SCRIPT DE CORREÇÃO PARA GITHUB PAGES E SUPABASE ---
-        // Este script lida com o token de acesso que o Supabase anexa à URL após a confirmação do e-mail.
-        if (window.location.hash.includes('_token')) {
-            const params = new URLSearchParams(window.location.hash.substring(1)); // Remove o '#'
-            const accessToken = params.get('access_token');
-            const refreshToken = params.get('refresh_token');
-
-            if (accessToken && refreshToken) {
-                // Define a sessão usando os tokens da URL
-                supabase.createClient(supabaseUrl, supabaseKey).auth.setSession({
-                    access_token: accessToken,
-                    refresh_token: refreshToken,
-                }).then(({ error }) => {
-                    if (error) {
-                        console.error("Erro ao definir sessão a partir da URL:", error);
-                    }
-                    // Limpa a URL e recarrega a página para um estado limpo.
-                    window.location.replace(window.location.pathname);
-                });
-            }
-        }
-
+    document.addEventListener('DOMContentLoaded', async () => {
         // --- CONSTANTES E VARIÁVEIS GLOBAIS ---
-        // UI Elements
         const authContainer = document.getElementById('auth-container');
         const appSection = document.getElementById('appSection');
         const authSection = document.getElementById('authSection');
         const globalLoader = document.getElementById('globalLoader');
         const toast = document.getElementById('toast');
         const toastMessage = document.getElementById('toastMessage');
-
-        // Forms
         const loginForm = document.getElementById('loginForm');
         const registerForm = document.getElementById('registerForm');
-        
-        let currentUserProfile = null; // Armazena o perfil do usuário logado (incluindo o 'role')
-
-        // --- UI TRANSITIONS for Login/Register Panel ---
-        const signUpButton = document.getElementById('signUp');
-        const signInButton = document.getElementById('signIn');
-
-        signUpButton.addEventListener('click', () => { authContainer.classList.add('right-panel-active'); });
-        signInButton.addEventListener('click', () => { authContainer.classList.remove('right-panel-active'); });
+        let currentUserProfile = null;
 
         // --- CONFIGURAÇÃO DO SUPABASE ---
         const supabaseUrl = 'https://hpcbeqvlnfufdhilbpme.supabase.co';
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwY2JlcXZsbmZ1ZmRoaWxicG1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MTMzMTMsImV4cCI6MjA3NjA4OTMxM30.B_I6q-VLbCzs7EqjEL9jdlnKl2fIpEdpbNXs3OmVIsk';
         const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
-        // --- LÓGICA DE AUTENTICAÇÃO E SESSÃO ---
+        // --- FUNÇÕES DE UI E LÓGICA AUXILIAR ---
+        const setLoading = (isLoading) => { globalLoader.style.display = isLoading ? 'flex' : 'none'; };
+        
+        let toastTimeout;
+        const showToast = (message, type = 'success') => {
+            toastMessage.textContent = message;
+            toast.className = toast.className.replace(/bg-(green|red)-500/, `bg-${type === 'success' ? 'green' : 'red'}-500`);
+            toast.style.transform = 'translateX(0)';
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => { toast.style.transform = 'translateX(120%)'; }, 5000);
+        };
 
-        // Listener para mudanças no estado de autenticação
-        supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            setLoading(true);
-            if (event === 'INITIAL_SESSION' && session) {
-                await handleUserLoggedIn(session.user);
-            } else if (event === 'SIGNED_IN' && session) {
-                 await handleUserLoggedIn(session.user);
-            } else if (event === 'SIGNED_OUT') {
-                currentUserProfile = null;
+        const showApp = async () => {
+            authSection.style.display = 'none';
+            appSection.style.display = 'block';
+            document.getElementById('currentUser').innerHTML = `Bem-vindo, <span class="font-semibold">${currentUserProfile.email}</span> (<span class="italic">${currentUserProfile.role}</span>)`;
+            renderUIForRole();
+            await seedInitialData();
+            await updateDashboard();
+        };
+
+        const showAuth = () => {
+            appSection.style.display = 'none';
+            authSection.style.display = 'flex';
+            document.body.className = 'antialiased text-slate-700';
+        };
+
+        const renderUIForRole = () => {
+            document.body.className = 'antialiased text-slate-700';
+            const role = currentUserProfile.role;
+            document.body.classList.add(role);
+        };
+
+        // --- LÓGICA DE AUTENTICAÇÃO PRINCIPAL ---
+        const fetchUserProfile = async (user, retries = 5) => {
+            for (let i = 0; i <= retries; i++) {
+                const { data, error } = await supabaseClient.from('profiles').select('role').eq('id', user.id).single();
+                if (data) {
+                    currentUserProfile = { ...user, role: data.role };
+                    return true;
+                }
+                if (error && error.code !== 'PGRST116') {
+                    console.error('Erro ao buscar perfil:', error);
+                    return false;
+                }
+                if (i < retries) {
+                    await new Promise(res => setTimeout(res, 300));
+                }
+            }
+            return false;
+        };
+
+        const handleUserSession = async (session) => {
+            if (session && session.user) {
+                const profileLoaded = await fetchUserProfile(session.user);
+                if (profileLoaded) {
+                    await showApp();
+                } else {
+                    showToast('Falha ao sincronizar perfil. Tente logar novamente.', 'error');
+                    await supabaseClient.auth.signOut();
+                    showAuth();
+                }
+            } else {
                 showAuth();
             }
-            setLoading(false);
-        });
-        
-        async function handleUserLoggedIn(user) {
-            await fetchUserProfile(user);
-            if (currentUserProfile) {
-                showApp();
-            } else {
-                showToast('Falha ao sincronizar perfil. Tente logar novamente.', 'error');
-                await supabaseClient.auth.signOut();
-            }
-        }
+        };
 
+        // --- EVENT LISTENERS ---
+        document.getElementById('signUp').addEventListener('click', () => { authContainer.classList.add('right-panel-active'); });
+        document.getElementById('signIn').addEventListener('click', () => { authContainer.classList.remove('right-panel-active'); });
 
-        // Registro de novo usuário
         registerForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const email = document.getElementById('registerEmail').value;
@@ -521,42 +542,35 @@
             const { error } = await supabaseClient.auth.signUp({ 
                 email, 
                 password,
-                options: {
-                    emailRedirectTo: window.location.origin + window.location.pathname
-                }
-             });
+                options: { emailRedirectTo: window.location.href.split('#')[0] }
+            });
             setLoading(false);
 
-            if (error) {
-                showToast(error.message, 'error');
-            } else {
+            if (error) { showToast(error.message, 'error'); } 
+            else {
                 showToast('Registro bem-sucedido! Verifique seu e-mail para confirmação.', 'success');
                 authContainer.classList.remove('right-panel-active');
             }
         });
 
-        // Login do usuário
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            setLoading(true);
             const email = document.getElementById('loginEmail').value;
             const password = document.getElementById('loginPassword').value;
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
             
-            setLoading(true);
-            const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-            setLoading(false);
-
             if (error) {
-                if (error.message.includes('Email not confirmed')) {
-                    showToast('Por favor, confirme seu e-mail antes de fazer o login.', 'error');
-                } else if (error.message.includes('Invalid login credentials')) {
-                    showToast('Email ou senha inválidos. Verifique seus dados ou registre-se.', 'error');
-                } else {
-                    showToast(error.message, 'error');
-                }
+                 if (error.message.includes('Email not confirmed')) showToast('Por favor, confirme seu e-mail.', 'error');
+                 else if (error.message.includes('Invalid login credentials')) showToast('Email ou senha inválidos.', 'error');
+                 else showToast(error.message, 'error');
+                 setLoading(false);
+            } else if (data.session) {
+                 await handleUserSession(data.session);
+                 setLoading(false);
             }
         });
-        
-        // Validação de senha em tempo real
+
         const passwordInput = document.getElementById('registerPassword');
         const requirements = {
             length: document.getElementById('req-length'),
@@ -564,7 +578,6 @@
             number: document.getElementById('req-number'),
             special: document.getElementById('req-special'),
         };
-
         passwordInput.addEventListener('input', () => {
             const value = passwordInput.value;
             requirements.length.classList.toggle('valid', value.length >= 8);
@@ -573,78 +586,22 @@
             requirements.special.classList.toggle('valid', /[^A-Za-z0-9]/.test(value));
         });
 
-
-        // Logout
         document.getElementById('logoutButton').addEventListener('click', async () => {
             setLoading(true);
             await supabaseClient.auth.signOut();
+            showAuth();
             setLoading(false);
         });
-
-        // Busca o perfil do usuário na tabela 'profiles', com retentativas para evitar race conditions
-        async function fetchUserProfile(user, retries = 5) {
-            for (let i = 0; i <= retries; i++) {
-                const { data, error } = await supabaseClient
-                    .from('profiles')
-                    .select('role')
-                    .eq('id', user.id)
-                    .single();
-
-                if (data) {
-                    currentUserProfile = { ...user, role: data.role };
-                    return;
-                }
-
-                if (error && error.code !== 'PGRST116') {
-                    console.error('Erro ao buscar perfil:', error);
-                    currentUserProfile = null;
-                    return;
-                }
-                
-                if (i < retries) {
-                    console.warn(`Perfil não encontrado, tentando novamente... (${i + 1}/${retries})`);
-                    await new Promise(res => setTimeout(res, i * 500 + 250)); // Aumenta o tempo de espera a cada tentativa
-                }
-            }
-            
-            console.error('Não foi possível buscar o perfil do usuário após várias tentativas.');
-            currentUserProfile = null;
-        }
         
-        
-        // --- LÓGICA DE DADOS (SUPABASE) ---
-
-        // Popula o banco com dados iniciais se a tabela de produtos estiver vazia
-        async function seedInitialData() {
+        // --- LÓGICA DE DADOS ---
+        async function seedInitialData() { 
             const { count, error } = await supabaseClient.from('products').select('*', { count: 'exact', head: true });
             if (error) { console.error("Erro ao verificar produtos:", error); return; }
 
             if (count === 0) {
                 showToast("Primeiro acesso detectado. Populando estoque inicial...");
                 setLoading(true);
-                const initialData = [
-                    { name: "Alicate de Bico Meia Cana Reto", quantity: 13 }, { name: "Chave ajustavel \"8\" (CHAVE INGLESA)", quantity: 3 },
-                    { name: "Esmerilhadeira angular", quantity: 1 }, { name: "Percloreto de Ferro PF-1", quantity: 1 },
-                    { name: "Perfurador de Placa P/ Circuito Impresso", quantity: 4 }, { name: "Placa para Circuito Impresso", quantity: 40 },
-                    { name: "Suporte para Ferro de Soldar", quantity: 7 }, { name: "Ferro de Soldar", quantity: 7 }, { name: "Solda 22g", quantity: 14 },
-                    { name: "Chave de Fenda - ponta magnetica (3/16\" x 6\")", quantity: 13 }, { name: "Chave de Fenda - ponta magnetica (1/4\" x 6\")", quantity: 13 },
-                    { name: "Chave de Phillips - ponta magnetica (1/8\" x 5\")", quantity: 13 }, { name: "Chave de Phillips - ponta magnetica - n° 1", quantity: 13 },
-                    { name: "Chave de Phillips - ponta magnetica - n° 2", quantity: 13 }, { name: "Fitas Isolantes classe C 10 metros", quantity: 3 },
-                    { name: "Identificador de Cabos Multifunção", quantity: 7 }, { name: "Jogo de Chaves ALLEN - 9 pcs", quantity: 13 },
-                    { name: "Paquimetro Universal 150mm", quantity: 7 }, { name: "Sugador de Solda", quantity: 7 },
-                    { name: "Jogo de Chaves Relojoeiro 2 phillips 4 fendas", quantity: 6 }, { name: "Kits FPGA com USB Blater", quantity: 3 },
-                    { name: "Alicate Corta e Desencapa Cabos \"7\"", quantity: 13 }, { name: "Alicate Crimpar / Crimpador Desencapar Cabo De Rede", quantity: 4 },
-                    { name: "Alicate de Corte Diagonal \"6\" - Black Nikel", quantity: 14 }, { name: "Alicate de Crimpar Catraca 3 em 1", quantity: 15 },
-                    { name: "Alicate Decapador", quantity: 8 }, { name: "Alicate Push Down", quantity: 15 }, { name: "Alicate Push Down sem Regulagem", quantity: 4 },
-                    { name: "Baterias 9w", quantity: 3 }, { name: "Cabos de Transferencia de Dados USB x Impressora", quantity: 20 },
-                    { name: "Resistores", quantity: 250 }, { name: "Arduino UNO R3 + Cabo USB", quantity: 20 }, { name: "Arduino Nano + Cabo USB", quantity: 4 },
-                    { name: "Cabo de comunicação Azul para Arduino", quantity: 8 }, { name: "Protoboard 400 pontos", quantity: 3 },
-                    { name: "Multimeter", quantity: 4 }, { name: "Potenciometro Linear 10K", quantity: 40 }, { name: "Potenciometro Linear 1K", quantity: 1 },
-                    { name: "Bobinas PLA Branco", quantity: 1 }, { name: "Bobinas PLA Preto", quantity: 1 }, { name: "Bobinas PLA Pink", quantity: 1 },
-                    { name: "Bobinas ABS Verde Claro", quantity: 1 }, { name: "Maleta Organizadora ESP-32 DEVKIT V1", quantity: 13 },
-                    { name: "Maleta Organizadora de Componentes Eletronicos", quantity: 2 }
-                ];
-                
+                const initialData = [ { name: "Alicate de Bico Meia Cana Reto", quantity: 13 }, { name: "Chave ajustavel \"8\" (CHAVE INGLESA)", quantity: 3 }, { name: "Esmerilhadeira angular", quantity: 1 }, { name: "Percloreto de Ferro PF-1", quantity: 1 }, { name: "Perfurador de Placa P/ Circuito Impresso", quantity: 4 }, { name: "Placa para Circuito Impresso", quantity: 40 }, { name: "Suporte para Ferro de Soldar", quantity: 7 }, { name: "Ferro de Soldar", quantity: 7 }, { name: "Solda 22g", quantity: 14 }, { name: "Chave de Fenda - ponta magnetica (3/16\" x 6\")", quantity: 13 }, { name: "Chave de Fenda - ponta magnetica (1/4\" x 6\")", quantity: 13 }, { name: "Chave de Phillips - ponta magnetica (1/8\" x 5\")", quantity: 13 }, { name: "Chave de Phillips - ponta magnetica - n° 1", quantity: 13 }, { name: "Chave de Phillips - ponta magnetica - n° 2", quantity: 13 }, { name: "Fitas Isolantes classe C 10 metros", quantity: 3 }, { name: "Identificador de Cabos Multifunção", quantity: 7 }, { name: "Jogo de Chaves ALLEN - 9 pcs", quantity: 13 }, { name: "Paquimetro Universal 150mm", quantity: 7 }, { name: "Sugador de Solda", quantity: 7 }, { name: "Jogo de Chaves Relojoeiro 2 phillips 4 fendas", quantity: 6 }, { name: "Kits FPGA com USB Blater", quantity: 3 }, { name: "Alicate Corta e Desencapa Cabos \"7\"", quantity: 13 }, { name: "Alicate Crimpar / Crimpador Desencapar Cabo De Rede", quantity: 4 }, { name: "Alicate de Corte Diagonal \"6\" - Black Nikel", quantity: 14 }, { name: "Alicate de Crimpar Catraca 3 em 1", quantity: 15 }, { name: "Alicate Decapador", quantity: 8 }, { name: "Alicate Push Down", quantity: 15 }, { name: "Alicate Push Down sem Regulagem", quantity: 4 }, { name: "Baterias 9w", quantity: 3 }, { name: "Cabos de Transferencia de Dados USB x Impressora", quantity: 20 }, { name: "Resistores", quantity: 250 }, { name: "Arduino UNO R3 + Cabo USB", quantity: 20 }, { name: "Arduino Nano + Cabo USB", quantity: 4 }, { name: "Cabo de comunicação Azul para Arduino", quantity: 8 }, { name: "Protoboard 400 pontos", quantity: 3 }, { name: "Multimeter", quantity: 4 }, { name: "Potenciometro Linear 10K", quantity: 40 }, { name: "Potenciometro Linear 1K", quantity: 1 }, { name: "Bobinas PLA Branco", quantity: 1 }, { name: "Bobinas PLA Preto", quantity: 1 }, { name: "Bobinas PLA Pink", quantity: 1 }, { name: "Bobinas ABS Verde Claro", quantity: 1 }, { name: "Maleta Organizadora ESP-32 DEVKIT V1", quantity: 13 }, { name: "Maleta Organizadora de Componentes Eletronicos", quantity: 2 } ];
                 const { error: insertError } = await supabaseClient.from('products').insert(initialData);
                 if (insertError) {
                     showToast("Erro ao popular estoque: " + insertError.message, 'error');
@@ -655,9 +612,7 @@
             }
         }
         
-        // --- LÓGICA PRINCIPAL DA APLICAÇÃO ---
-        
-        async function updateDashboard() {
+        async function updateDashboard() { 
             if(!currentUserProfile) return;
             setLoading(true);
             const { data: products, errorP } = await supabaseClient.from('products').select('*').order('name');
@@ -677,7 +632,7 @@
             }
         }
         
-        function updateEstoqueTable(products) {
+        function updateEstoqueTable(products) { 
             const tableBody = document.getElementById('estoqueTableBody');
             if (products.length === 0) {
                 tableBody.innerHTML = '<tr><td colspan="3" class="text-center p-4 text-slate-500">Nenhum produto em estoque.</td></tr>';
@@ -692,9 +647,9 @@
                     </td>
                 </tr>
             `).join('');
-        }
+         }
         
-        function updateMovimentacoesList(movements) {
+        function updateMovimentacoesList(movements) { 
             const list = document.getElementById('movimentacoesList');
             if (movements.length === 0) {
                 list.innerHTML = '<li class="text-center p-4 text-slate-500">Nenhuma movimentação registrada.</li>';
@@ -711,74 +666,26 @@
                     <span class="text-xs text-slate-400 block">${new Date(m.created_at).toLocaleString('pt-BR')}</span>
                 </li>`;
             }).join('');
-        }
+         }
         
-        async function updateSmartIndicators() {
-            const { data, error } = await supabaseClient
-                .from('movements')
-                .select('quantity, products(name)')
-                .in('type', ['saida', 'emprestimo']);
-            
+        async function updateSmartIndicators() { 
+            const { data, error } = await supabaseClient.from('movements').select('quantity, products(name)').in('type', ['saida', 'emprestimo']);
             if(error) { console.error(error); return; }
-
             const counts = data.reduce((acc, m) => {
                 if(!m.products || !m.products.name) return acc;
                 acc[m.products.name] = (acc[m.products.name] || 0) + m.quantity;
                 return acc;
             }, {});
-
             const topMoved = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-            
             const list = document.getElementById('topMovedProducts');
             if(topMoved.length === 0) {
                 list.innerHTML = '<li class="text-slate-500">Nenhuma movimentação de saída registrada.</li>';
                 return;
             }
-            list.innerHTML = topMoved.map(([name, count]) => `
-                <li class="flex justify-between">
-                    <span>${name}</span>
-                    <span class="font-bold">${count}</span>
-                </li>
-            `).join('');
-        }
+            list.innerHTML = topMoved.map(([name, count]) => `<li class="flex justify-between"><span>${name}</span><span class="font-bold">${count}</span></li>`).join('');
+         }
         
-        async function showApp() {
-            authSection.style.display = 'none';
-            appSection.style.display = 'block';
-            document.getElementById('currentUser').innerHTML = `Bem-vindo, <span class="font-semibold">${currentUserProfile.email}</span> (<span class="italic">${currentUserProfile.role}</span>)`;
-            renderUIForRole();
-            await seedInitialData();
-            await updateDashboard();
-        }
-
-        function showAuth() {
-            appSection.style.display = 'none';
-            authSection.style.display = 'flex';
-            document.body.className = 'antialiased text-slate-700';
-        }
-
-        function renderUIForRole() {
-            document.body.className = 'antialiased text-slate-700'; // Limpa classes antigas
-            const role = currentUserProfile.role;
-            document.body.classList.add(role);
-        }
-
-        function setLoading(isLoading) {
-            globalLoader.style.display = isLoading ? 'flex' : 'none';
-        }
-
-        let toastTimeout;
-        function showToast(message, type = 'success') {
-            toastMessage.textContent = message;
-            toast.className = toast.className.replace(/bg-(green|red)-500/, `bg-${type === 'success' ? 'green' : 'red'}-500`);
-            toast.style.transform = 'translateX(0)';
-            clearTimeout(toastTimeout);
-            toastTimeout = setTimeout(() => {
-                toast.style.transform = 'translateX(120%)';
-            }, 5000); 
-        }
-        
-        window.handleDeleteProduct = async (id, name) => {
+        window.handleDeleteProduct = async (id, name) => { 
             if (confirm(`Tem certeza que deseja excluir o produto "${name}"? Esta ação não pode ser desfeita.`)) {
                 setLoading(true);
                 const { error } = await supabaseClient.from('products').delete().eq('id', id);
@@ -790,8 +697,17 @@
                     updateDashboard();
                 }
             }
+         };
+        
+        // --- INICIALIZAÇÃO DA APLICAÇÃO ---
+        const initializeApp = async () => {
+            setLoading(true);
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            await handleUserSession(session);
+            setLoading(false);
         };
 
+        initializeApp();
     });
     </script>
 </body>
