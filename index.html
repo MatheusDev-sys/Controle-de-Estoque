@@ -267,7 +267,7 @@
     </div>
     
     <!-- Modals -->
-    <div id="actionModal" class="modal fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden opacity-0">
+    <div id="actionModal" class="modal fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden">
         <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md">
             <h2 id="modalTitle" class="text-2xl font-bold mb-6 text-center"></h2>
             <form id="modalForm">
@@ -287,19 +287,19 @@
         </div>
     </div>
     
-    <div id="alertModal" class="modal fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden opacity-0">
-        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-lg">
+    <div id="alertModal" class="modal fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-2xl">
              <div class="flex items-center justify-between mb-4">
                 <h2 class="text-2xl font-bold text-orange-600">Alertas de Baixo Estoque</h2>
                 <button id="closeAlertModal" class="text-slate-500 hover:text-slate-800 text-2xl font-bold">&times;</button>
             </div>
-            <p class="text-sm text-slate-600 mb-4">Itens com estoque baixo (igual ou inferior a 5) e previsão de término.</p>
+            <p class="text-sm text-slate-600 mb-4">Itens com estoque baixo (igual ou inferior a 5).</p>
             <div id="alertList" class="overflow-auto max-h-80"></div>
         </div>
     </div>
 
-    <div id="manageUsersModal" class="modal fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden opacity-0">
-        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-2xl">
+    <div id="manageUsersModal" class="modal fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-3xl">
              <div class="flex items-center justify-between mb-4">
                 <h2 class="text-2xl font-bold">Gerenciar Usuários</h2>
                 <button id="closeUsersModal" class="text-slate-500 hover:text-slate-800 text-2xl font-bold">&times;</button>
@@ -334,7 +334,7 @@
     // =============================================================================================
     
     // =============================================================================================
-    //                              CONFIGURAÇÃO DO BANCO DE DADOS (SUPABASE)
+    //                       CONFIGURAÇÃO DO BANCO DE DADOS (SUPABASE) - SCRIPT ATUALIZADO
     // =============================================================================================
     /*
 
@@ -377,26 +377,24 @@
     ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
     ALTER TABLE public.movements ENABLE ROW LEVEL SECURITY;
 
-    -- Limpa políticas antigas antes de criar novas para garantir um estado limpo
+    -- Limpa políticas antigas e funções antes de criar novas
     DROP POLICY IF EXISTS "Admins can manage all profiles." ON public.profiles;
     DROP POLICY IF EXISTS "Users can view their own profile." ON public.profiles;
     DROP POLICY IF EXISTS "Users can insert their own profile." ON public.profiles;
     DROP POLICY IF EXISTS "Users can update own profile." ON public.profiles;
-    DROP POLICY IF EXISTS "Allow all authenticated to read products and movements" ON public.products;
-    DROP POLICY IF EXISTS "Allow all authenticated to manage products" ON public.products;
-    DROP POLICY IF EXISTS "Allow all authenticated to read products and movements" ON public.movements;
-    DROP POLICY IF EXISTS "Allow all authenticated to insert movements" ON public.movements;
+    DROP POLICY IF EXISTS "Allow all authenticated for products" ON public.products;
+    DROP POLICY IF EXISTS "Allow all authenticated for movements" ON public.movements;
     DROP FUNCTION IF EXISTS get_my_role();
+    DROP FUNCTION IF EXISTS delete_auth_user(uuid);
+    DROP FUNCTION IF EXISTS record_movement(text,text,integer,text,text,date);
 
-    -- Função auxiliar para buscar o 'role' do usuário atual de forma segura, evitando recursão.
+    -- Função auxiliar para buscar o 'role' do usuário atual de forma segura.
     CREATE OR REPLACE FUNCTION get_my_role()
-    RETURNS TEXT AS $$
+    RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER AS $$
     BEGIN
-      -- Esta função é SECURITY DEFINER, então ela ignora as políticas RLS da tabela 'profiles'
-      -- permitindo a verificação do 'role' sem causar um loop infinito.
       RETURN (SELECT role FROM public.profiles WHERE id = auth.uid());
     END;
-    $$ LANGUAGE plpgsql SECURITY DEFINER;
+    $$;
 
     -- Políticas de Acesso para a tabela PROFILES
     CREATE POLICY "Admins can manage all profiles." ON public.profiles FOR ALL USING (get_my_role() = 'admin');
@@ -404,42 +402,107 @@
     CREATE POLICY "Users can insert their own profile." ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
     CREATE POLICY "Users can update own profile." ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
-    -- Políticas para PRODUCTS e MOVEMENTS (estoque compartilhado)
-    CREATE POLICY "Allow all authenticated to read products and movements" ON public.products FOR SELECT USING (auth.role() = 'authenticated');
-    CREATE POLICY "Allow all authenticated to manage products" ON public.products FOR ALL USING (auth.role() = 'authenticated');
+    -- Políticas de Acesso para PRODUCTS e MOVEMENTS
+    CREATE POLICY "Allow all authenticated for products" ON public.products FOR ALL USING (auth.role() = 'authenticated');
+    CREATE POLICY "Allow all authenticated for movements" ON public.movements FOR ALL USING (auth.role() = 'authenticated');
     
-    CREATE POLICY "Allow all authenticated to read products and movements" ON public.movements FOR SELECT USING (auth.role() = 'authenticated');
-    CREATE POLICY "Allow all authenticated to insert movements" ON public.movements FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-
-    -- Função para criar o perfil automaticamente e definir o papel de ADMIN
+    -- Função para criar o perfil automaticamente
     CREATE OR REPLACE FUNCTION public.handle_new_user()
-    RETURNS TRIGGER AS $$
+    RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
     BEGIN
       INSERT INTO public.profiles (id, email, role)
       VALUES (
         new.id,
         new.email,
-        CASE
-          WHEN new.email = 'adm@stockvision.com' THEN 'admin'
-          ELSE 'estoquista'
-        END
+        CASE WHEN new.email = 'adm@stockvision.com' THEN 'admin' ELSE 'estoquista' END
       );
       RETURN new;
     END;
-    $$ LANGUAGE plpgsql SECURITY DEFINER;
+    $$;
 
-    -- Trigger que chama a função quando um novo usuário se registra no Auth
+    -- Trigger que chama a função quando um novo usuário se registra
     DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
     CREATE TRIGGER on_auth_user_created
       AFTER INSERT ON auth.users
       FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+    -- Função para admins deletarem usuários (chamada via RPC)
+    CREATE OR REPLACE FUNCTION delete_auth_user(user_id_to_delete uuid)
+    RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER AS $$
+    BEGIN
+      IF get_my_role() != 'admin' THEN
+        RETURN 'Apenas administradores podem excluir usuários.';
+      END IF;
+      DELETE FROM auth.users WHERE id = user_id_to_delete;
+      RETURN 'Usuário excluído com sucesso.';
+    END;
+    $$;
+
+    -- Função para registrar movimentação de estoque (chamada via RPC)
+    CREATE OR REPLACE FUNCTION record_movement(
+        p_name text,
+        p_type text,
+        p_quantity integer,
+        p_user_email text,
+        p_loaned_to text DEFAULT NULL,
+        p_return_date date DEFAULT NULL
+    ) RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER AS $$
+    DECLARE
+        v_product_id int;
+        v_current_quantity int;
+    BEGIN
+        SELECT id INTO v_product_id FROM public.products WHERE name = p_name;
+
+        IF v_product_id IS NULL AND p_type = 'entrada' THEN
+            INSERT INTO public.products (name, quantity) VALUES (p_name, 0) RETURNING id INTO v_product_id;
+        ELSIF v_product_id IS NULL THEN
+            RETURN 'ERRO: Produto não encontrado.';
+        END IF;
+
+        IF p_type IN ('saida', 'emprestimo') THEN
+            SELECT quantity INTO v_current_quantity FROM public.products WHERE id = v_product_id;
+            IF v_current_quantity < p_quantity THEN
+                RETURN 'ERRO: Estoque insuficiente.';
+            END IF;
+        END IF;
+
+        IF p_type = 'entrada' THEN
+            UPDATE public.products SET quantity = quantity + p_quantity WHERE id = v_product_id;
+        ELSE
+            UPDATE public.products SET quantity = quantity - p_quantity WHERE id = v_product_id;
+        END IF;
+
+        INSERT INTO public.movements (product_id, user_email, type, quantity, loaned_to, return_date)
+        VALUES (v_product_id, p_user_email, p_type, p_quantity, p_loaned_to, p_return_date);
+
+        RETURN 'Movimentação registrada com sucesso.';
+    END;
+    $$;
     */
     // =============================================================================================
     -->
 
     <script>
     document.addEventListener('DOMContentLoaded', async () => {
+        // --- SCRIPT DE CORREÇÃO PARA GITHUB PAGES E SUPABASE ---
+        if (window.location.hash.includes('_token')) {
+            const params = new URLSearchParams(window.location.hash.substring(1));
+            const accessToken = params.get('access_token');
+            const refreshToken = params.get('refresh_token');
+
+            if (accessToken && refreshToken) {
+                const tempSupabaseUrl = 'https://hpcbeqvlnfufdhilbpme.supabase.co';
+                const tempSupabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwY2JlcXZsbmZ1ZmRoaWxicG1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MTMzMTMsImV4cCI6MjA3NjA4OTMxM30.B_I6q-VLbCzs7EqjEL9jdlnKl2fIpEdpbNXs3OmVIsk';
+                
+                await supabase.createClient(tempSupabaseUrl, tempSupabaseKey).auth.setSession({
+                    access_token: accessToken,
+                    refresh_token: refreshToken,
+                });
+                window.location.replace(window.location.pathname);
+                return; 
+            }
+        }
+
         // --- CONSTANTES E VARIÁVEIS GLOBAIS ---
         const authContainer = document.getElementById('auth-container');
         const appSection = document.getElementById('appSection');
@@ -593,7 +656,145 @@
             setLoading(false);
         });
         
-        // --- LÓGICA DE DADOS ---
+        // --- LÓGICA DAS FUNCIONALIDADES ---
+        
+        // Abrir Modals de Ação
+        const actionModal = document.getElementById('actionModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalForm = document.getElementById('modalForm');
+        const emprestimoFields = document.getElementById('emprestimoFields');
+        let currentActionType = '';
+
+        const openActionModal = (type) => {
+            currentActionType = type;
+            modalForm.reset();
+            modalTitle.textContent = `Registrar ${type.charAt(0).toUpperCase() + type.slice(1)}`;
+            emprestimoFields.classList.toggle('hidden', type !== 'emprestimo');
+            document.getElementById('modalPessoa').required = type === 'emprestimo';
+            document.getElementById('modalDevolucao').required = type === 'emprestimo';
+            actionModal.classList.remove('hidden');
+        };
+
+        document.getElementById('btn-add-entrada').addEventListener('click', () => openActionModal('entrada'));
+        document.getElementById('btn-add-saida').addEventListener('click', () => openActionModal('saida'));
+        document.getElementById('btn-add-emprestimo').addEventListener('click', () => openActionModal('emprestimo'));
+        document.getElementById('modalCancel').addEventListener('click', () => actionModal.classList.add('hidden'));
+
+        // Submissão do Modal de Ação
+        modalForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setLoading(true);
+
+            const params = {
+                p_name: document.getElementById('modalProduto').value,
+                p_type: currentActionType,
+                p_quantity: parseInt(document.getElementById('modalQuantidade').value),
+                p_user_email: currentUserProfile.email,
+                p_loaned_to: currentActionType === 'emprestimo' ? document.getElementById('modalPessoa').value : null,
+                p_return_date: currentActionType === 'emprestimo' ? document.getElementById('modalDevolucao').value : null,
+            };
+
+            const { data, error } = await supabaseClient.rpc('record_movement', params);
+
+            setLoading(false);
+            if (error || (data && data.startsWith('ERRO'))) {
+                showToast(error ? error.message : data, 'error');
+            } else {
+                showToast(data || 'Ação registrada com sucesso!', 'success');
+                actionModal.classList.add('hidden');
+                await updateDashboard();
+            }
+        });
+
+        // Modal de Alertas
+        const alertModal = document.getElementById('alertModal');
+        document.getElementById('btn-show-alertas').addEventListener('click', async () => {
+            setLoading(true);
+            const { data, error } = await supabaseClient.from('products').select('*').lte('quantity', 5).order('quantity');
+            setLoading(false);
+
+            if (error) {
+                showToast('Erro ao buscar alertas.', 'error');
+                return;
+            }
+
+            const alertList = document.getElementById('alertList');
+            if (data.length === 0) {
+                alertList.innerHTML = '<p class="text-center text-slate-500">Nenhum item com baixo estoque.</p>';
+            } else {
+                alertList.innerHTML = `
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-slate-100"><tr><th class="p-2">Produto</th><th class="p-2">Qtd. Restante</th></tr></thead>
+                        <tbody>${data.map(p => `
+                            <tr class="border-b"><td class="p-2">${p.name}</td><td class="p-2 font-bold text-red-600">${p.quantity}</td></tr>`
+                        ).join('')}</tbody>
+                    </table>`;
+            }
+            alertModal.classList.remove('hidden');
+        });
+        document.getElementById('closeAlertModal').addEventListener('click', () => alertModal.classList.add('hidden'));
+
+        // Modal de Gerenciar Usuários
+        const manageUsersModal = document.getElementById('manageUsersModal');
+        document.getElementById('manageUsersButton').addEventListener('click', async () => {
+            setLoading(true);
+            const { data, error } = await supabaseClient.from('profiles').select('id, email, role').order('email');
+            setLoading(false);
+
+            if (error) {
+                showToast('Erro ao carregar usuários.', 'error');
+                return;
+            }
+
+            const usersList = document.getElementById('usersList');
+            usersList.innerHTML = `
+                <table class="w-full text-sm text-left">
+                    <thead class="bg-slate-100"><tr><th class="p-2">Email</th><th class="p-2">Cargo</th><th class="p-2">Ações</th></tr></thead>
+                    <tbody>${data.map(user => `
+                        <tr class="border-b">
+                            <td class="p-2">${user.email}</td>
+                            <td class="p-2">
+                                <select onchange="updateUserRole('${user.id}', this.value)" class="p-1 border rounded-md bg-white" ${currentUserProfile.id === user.id ? 'disabled' : ''}>
+                                    <option value="estoquista" ${user.role === 'estoquista' ? 'selected' : ''}>Estoquista</option>
+                                    <option value="gerente" ${user.role === 'gerente' ? 'selected' : ''}>Gerente</option>
+                                    <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+                                </select>
+                            </td>
+                            <td class="p-2">
+                                <button onclick="deleteUser('${user.id}', '${user.email}')" class="text-red-500 hover:text-red-700" ${currentUserProfile.id === user.id ? 'disabled' : ''}>Excluir</button>
+                            </td>
+                        </tr>
+                    `).join('')}</tbody>
+                </table>`;
+            manageUsersModal.classList.remove('hidden');
+        });
+        document.getElementById('closeUsersModal').addEventListener('click', () => manageUsersModal.classList.add('hidden'));
+        
+        window.updateUserRole = async (userId, newRole) => {
+            setLoading(true);
+            const { error } = await supabaseClient.from('profiles').update({ role: newRole }).eq('id', userId);
+            setLoading(false);
+            if (error) {
+                showToast('Erro ao atualizar cargo.', 'error');
+            } else {
+                showToast('Cargo atualizado com sucesso!', 'success');
+            }
+        };
+
+        window.deleteUser = async (userId, userEmail) => {
+            if (confirm(`Tem certeza que deseja excluir o usuário ${userEmail}? Esta ação não pode ser desfeita.`)) {
+                setLoading(true);
+                const { data, error } = await supabaseClient.rpc('delete_auth_user', { user_id_to_delete: userId });
+                setLoading(false);
+                if (error || (data && !data.includes('sucesso'))) {
+                     showToast(error ? error.message : data, 'error');
+                } else {
+                    showToast(data, 'success');
+                    document.getElementById('manageUsersButton').click(); // Recarrega a lista
+                }
+            }
+        };
+
         async function seedInitialData() { 
             const { count, error } = await supabaseClient.from('products').select('*', { count: 'exact', head: true });
             if (error) { console.error("Erro ao verificar produtos:", error); return; }
